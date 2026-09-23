@@ -22,7 +22,10 @@ class OptionalSchemeArgs {
 
 @TauriPlugin
 class SystemThemePlugin(private val activity: Activity) : Plugin(activity) {
+    private var webView: WebView? = null
+
     override fun load(webView: WebView) {
+        this.webView = webView
         activity.runOnUiThread {
             SystemTheme.makeNavigationBarTransparent(activity.window)
         }
@@ -44,10 +47,20 @@ class SystemThemePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(OptionalSchemeArgs::class.java)
 
         activity.runOnUiThread {
-            SystemTheme.overrideSystemBarsColorScheme(activity, activity.window, args.scheme)
+            // A host that keeps the webview clear of the bars shows its themed
+            // window background behind them, not the overlay the override is for.
+            val scheme = if (webViewUnderStatusBar()) args.scheme else null
+            SystemTheme.overrideSystemBarsColorScheme(activity, activity.window, scheme)
         }
 
         invoke.resolve()
+    }
+
+    private fun webViewUnderStatusBar(): Boolean {
+        val webView = webView ?: return true
+        val location = IntArray(2)
+        webView.getLocationInWindow(location)
+        return location[1] == 0
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
