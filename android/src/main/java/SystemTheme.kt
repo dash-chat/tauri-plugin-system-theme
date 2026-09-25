@@ -64,6 +64,16 @@ object SystemTheme {
     }
 
     /**
+     * A recreated activity comes with a fresh window, which needs the bars set
+     * up again, and a reloaded page, which no longer holds a bars override.
+     */
+    fun applyToRecreatedWindow(context: Context, window: Window) {
+        makeNavigationBarTransparent(window)
+        barsColorSchemeOverridden = false
+        applyBarsAppearance(window, isNight(context.resources.configuration))
+    }
+
+    /**
      * Re-apply the stored scheme at activity creation. On API 31+ the system
      * persists it and has already drawn the starting window with it before the
      * process started, so there is nothing left to do.
