@@ -105,6 +105,11 @@ icons stop tracking:
 The plugin owns the nav bar's *icon colour* only. Its colour and contrast stay
 your theme's business.
 
+On Android WebViews older than M136, which report the system bars as 0 in
+`env(safe-area-inset-*)`, the plugin pads the webview in from the bars instead of
+leaving it edge-to-edge, and `overrideSystemBarsColorScheme` becomes a no-op since
+the bars then sit over the themed window background.
+
 ## Usage
 
 ```typescript
