@@ -1,8 +1,14 @@
 package org.dashchat.systemtheme
 
 import android.app.Activity
+import android.app.Application
 import android.content.res.Configuration
+import android.os.Bundle
+import android.view.View
 import android.webkit.WebView
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -22,13 +28,63 @@ class OptionalSchemeArgs {
 
 @TauriPlugin
 class SystemThemePlugin(private val activity: Activity) : Plugin(activity) {
-    private var webView: WebView? = null
+    private val keepsWebViewClearOfBars = !webViewReportsSystemBarInsets()
 
     override fun load(webView: WebView) {
-        this.webView = webView
         activity.runOnUiThread {
             SystemTheme.makeNavigationBarTransparent(activity.window)
+            if (keepsWebViewClearOfBars) {
+                insetContentFromSystemBars(activity)
+                insetRecreatedActivities()
+            }
         }
+    }
+
+    // Tauri loads a plugin once per process, but the activity is recreated on
+    // the config changes it doesn't handle itself (density, font scale, overlays).
+    private fun insetRecreatedActivities() {
+        activity.application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(created: Activity, savedInstanceState: Bundle?) {
+                if (created.javaClass == activity.javaClass) {
+                    created.window.decorView.post { insetContentFromSystemBars(created) }
+                }
+            }
+
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityResumed(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
+    }
+
+    // WebView only exposes the system bars through env(safe-area-inset-*) from
+    // M136; older ones report 0 there, so the page would draw under the bars.
+    private fun webViewReportsSystemBarInsets(): Boolean {
+        val major = WebView.getCurrentWebViewPackage()?.versionName
+            ?.substringBefore('.')?.toIntOrNull() ?: return false
+        return major >= 136
+    }
+
+    /**
+     * Keeps the webview between the system bars instead of edge-to-edge. The
+     * webview gets the bars zeroed out, so a WebView that does report them
+     * can't pad the page a second time.
+     */
+    private fun insetContentFromSystemBars(activity: Activity) {
+        val content = activity.findViewById<View>(android.R.id.content)
+        val bars = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val inset = insets.getInsets(bars)
+            view.setPadding(inset.left, inset.top, inset.right, inset.bottom)
+            WindowInsetsCompat.Builder(insets)
+                .setInsets(bars, Insets.NONE)
+                .setDisplayCutout(null)
+                .build()
+        }
+        // The window dispatched its first insets before the plugin loaded.
+        ViewCompat.requestApplyInsets(content)
     }
 
     @Command
@@ -47,20 +103,13 @@ class SystemThemePlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(OptionalSchemeArgs::class.java)
 
         activity.runOnUiThread {
-            // A host that keeps the webview clear of the bars shows its themed
-            // window background behind them, not the overlay the override is for.
-            val scheme = if (webViewUnderStatusBar()) args.scheme else null
+            // With the webview kept clear of the bars, they show the themed
+            // window background, not the overlay the override is for.
+            val scheme = if (keepsWebViewClearOfBars) null else args.scheme
             SystemTheme.overrideSystemBarsColorScheme(activity, activity.window, scheme)
         }
 
         invoke.resolve()
-    }
-
-    private fun webViewUnderStatusBar(): Boolean {
-        val webView = webView ?: return true
-        val location = IntArray(2)
-        webView.getLocationInWindow(location)
-        return location[1] == 0
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
